@@ -11,6 +11,8 @@ export interface UserProfile {
   unlockedSkills: string[]
   completedMissions: string[]
   earnedBadges: string[]
+  earnedBadgeRecords: EarnedBadgeRecord[]
+  legendaryCelebrationShown: boolean
 }
 
 export interface Scenario {
@@ -82,6 +84,23 @@ export interface Reply {
   authorNickname: string
   content: string
   createdAt: string
+}
+
+export type BadgeRarity = "common" | "rare" | "legendary"
+
+export interface Badge {
+  id: string
+  skillId: string | null
+  name: string
+  emoji: string
+  description: string
+  rarity: BadgeRarity
+  category: string
+}
+
+export interface EarnedBadgeRecord {
+  badgeId: string
+  earnedAt: string
 }
 
 export interface ScenarioResult {

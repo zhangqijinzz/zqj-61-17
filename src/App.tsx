@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route, Outlet } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Onboarding from "@/pages/Onboarding";
@@ -12,6 +13,8 @@ import Contract from "@/pages/Contract";
 import MiniGame from "@/pages/MiniGame";
 import TreeHole from "@/pages/TreeHole";
 import TreeHolePost from "@/pages/TreeHolePost";
+import LegendaryCelebration from "@/components/LegendaryCelebration";
+import { useGameStore } from "@/store/useGameStore";
 
 function LayoutWrapper() {
   return (
@@ -21,9 +24,19 @@ function LayoutWrapper() {
   );
 }
 
-export default function App() {
+function AppContent() {
+  const migrateBadgeData = useGameStore((s) => s.migrateBadgeData)
+  const userProfile = useGameStore((s) => s.userProfile)
+
+  useEffect(() => {
+    if (userProfile) {
+      migrateBadgeData()
+    }
+  }, [userProfile, migrateBadgeData])
+
   return (
-    <Router>
+    <>
+      <LegendaryCelebration />
       <Routes>
         <Route path="/" element={<Onboarding />} />
         <Route element={<LayoutWrapper />}>
@@ -40,6 +53,14 @@ export default function App() {
           <Route path="/tree-hole/:postId" element={<TreeHolePost />} />
         </Route>
       </Routes>
+    </>
+  )
+}
+
+export default function App() {
+  return (
+    <Router>
+      <AppContent />
     </Router>
   );
 }

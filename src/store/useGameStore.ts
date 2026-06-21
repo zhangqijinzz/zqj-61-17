@@ -1,6 +1,7 @@
 import { create } from 'zustand'
-import { UserProfile, CharacterType, ScenarioResult, Mission, TreeHolePost, Reply } from '@/types'
+import { UserProfile, CharacterType, ScenarioResult, Mission, TreeHolePost, Reply, EarnedBadgeRecord, BadgeRarity } from '@/types'
 import { treeHolePosts } from '@/data/treeHolePosts'
+import { badges, getBadgeById, shouldAwardCommonCollectorBadge, rarityConfig } from '@/data/badges'
 
 const STORAGE_KEY = 'dad-adventure-state'
 
@@ -36,6 +37,7 @@ interface GameState {
   scenarioResults: ScenarioResult[]
   missions: Mission[]
   posts: TreeHolePost[]
+  pendingLegendaryBadge: string | null
 }
 
 interface GameActions {
@@ -49,17 +51,48 @@ interface GameActions {
   addReplyToPost: (postId: string, reply: Reply) => void
   togglePostLike: (postId: string) => void
   resetGame: () => void
+  markLegendaryCelebrationShown: () => void
+  clearPendingLegendaryBadge: () => void
+  migrateBadgeData: () => void
 }
 
 type StoreType = GameState & GameActions
 
+function migrateUserProfile(profile: any): UserProfile {
+  if (!profile) return profile
+
+  const migrated: UserProfile = {
+    ...profile,
+    earnedBadgeRecords: profile.earnedBadgeRecords ?? [],
+    legendaryCelebrationShown: profile.legendaryCelebrationShown ?? false,
+  }
+
+  if (migrated.earnedBadges && migrated.earnedBadgeRecords.length === 0) {
+    const baseTime = new Date(profile.createdAt || Date.now()).getTime()
+    migrated.earnedBadgeRecords = migrated.earnedBadges.map((badgeId: string, index: number) => ({
+      badgeId,
+      earnedAt: new Date(baseTime + index * 1000).toISOString(),
+    }))
+  }
+
+  return migrated
+}
+
 const savedState = loadFromLocalStorage()
 
+const migratedState = savedState
+  ? {
+      ...savedState,
+      userProfile: savedState.userProfile ? migrateUserProfile(savedState.userProfile) : null,
+    }
+  : null
+
 export const useGameStore = create<StoreType>()((set, get) => ({
-  userProfile: savedState?.userProfile ?? null,
-  scenarioResults: savedState?.scenarioResults ?? [],
-  missions: savedState?.missions ?? [],
-  posts: savedState?.posts ?? treeHolePosts,
+  userProfile: migratedState?.userProfile ?? null,
+  scenarioResults: migratedState?.scenarioResults ?? [],
+  missions: migratedState?.missions ?? [],
+  posts: migratedState?.posts ?? treeHolePosts,
+  pendingLegendaryBadge: null,
 
   createProfile: (characterType, nickname) => {
     const profile: UserProfile = {
@@ -73,6 +106,8 @@ export const useGameStore = create<StoreType>()((set, get) => ({
       unlockedSkills: [],
       completedMissions: [],
       earnedBadges: [],
+      earnedBadgeRecords: [],
+      legendaryCelebrationShown: false,
     }
     set({ userProfile: profile })
     saveToLocalStorage(get())
@@ -107,6 +142,36 @@ export const useGameStore = create<StoreType>()((set, get) => ({
     const state = get()
     if (!state.userProfile) return
 
+    const badgeId = `${skillId}-badge`
+    const badge = getBadgeById(badgeId)
+    const now = new Date().toISOString()
+
+    const newEarnedBadges = [...state.userProfile.earnedBadges, badgeId]
+    const newEarnedBadgeRecords: EarnedBadgeRecord[] = [
+      ...state.userProfile.earnedBadgeRecords,
+      { badgeId, earnedAt: now },
+    ]
+
+    let pendingLegendaryBadge: string | null = null
+    const legendaryCelebrationShown = state.userProfile.legendaryCelebrationShown
+
+    if (badge?.rarity === "legendary" && !legendaryCelebrationShown) {
+      pendingLegendaryBadge = badgeId
+    }
+
+    if (shouldAwardCommonCollectorBadge(newEarnedBadges) && !newEarnedBadges.includes("collector-common-all")) {
+      newEarnedBadges.push("collector-common-all")
+      newEarnedBadgeRecords.push({
+        badgeId: "collector-common-all",
+        earnedAt: now,
+      })
+
+      const collectorBadge = getBadgeById("collector-common-all")
+      if (collectorBadge?.rarity === "legendary" && !legendaryCelebrationShown && !pendingLegendaryBadge) {
+        pendingLegendaryBadge = "collector-common-all"
+      }
+    }
+
     const newLevel = state.userProfile.level + 1
     const newTitle = getTitleByLevel(newLevel)
 
@@ -116,8 +181,10 @@ export const useGameStore = create<StoreType>()((set, get) => ({
         level: newLevel,
         title: newTitle,
         unlockedSkills: [...state.userProfile.unlockedSkills, skillId],
-        earnedBadges: [...state.userProfile.earnedBadges, `${skillId}-badge`],
+        earnedBadges: newEarnedBadges,
+        earnedBadgeRecords: newEarnedBadgeRecords,
       },
+      pendingLegendaryBadge,
     })
     saveToLocalStorage(get())
   },
@@ -213,7 +280,44 @@ export const useGameStore = create<StoreType>()((set, get) => ({
       scenarioResults: [],
       missions: [],
       posts: treeHolePosts,
+      pendingLegendaryBadge: null,
     })
     localStorage.removeItem(STORAGE_KEY)
+  },
+
+  markLegendaryCelebrationShown: () => {
+    const state = get()
+    if (!state.userProfile) return
+
+    set({
+      userProfile: {
+        ...state.userProfile,
+        legendaryCelebrationShown: true,
+      },
+    })
+    saveToLocalStorage(get())
+  },
+
+  clearPendingLegendaryBadge: () => {
+    set({ pendingLegendaryBadge: null })
+  },
+
+  migrateBadgeData: () => {
+    const state = get()
+    if (!state.userProfile) return
+
+    const migratedProfile = migrateUserProfile(state.userProfile)
+
+    if (shouldAwardCommonCollectorBadge(migratedProfile.earnedBadges) && !migratedProfile.earnedBadges.includes("collector-common-all")) {
+      const now = new Date().toISOString()
+      migratedProfile.earnedBadges.push("collector-common-all")
+      migratedProfile.earnedBadgeRecords.push({
+        badgeId: "collector-common-all",
+        earnedAt: now,
+      })
+    }
+
+    set({ userProfile: migratedProfile })
+    saveToLocalStorage(get())
   },
 }))
